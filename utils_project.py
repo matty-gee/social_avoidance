@@ -27,7 +27,6 @@ from scipy.stats import (
 )
 from scipy.spatial import distance
 
-
 import statsmodels.api as sm
 from statsmodels.multivariate.cancorr import CanCorr
 from statsmodels.regression import linear_model
@@ -39,27 +38,26 @@ from matplotlib.patches import Patch
 import seaborn as sns
 import plotly.express as px
 
+import shapely
+from collections import Counter
+
+
+# sys.path.insert(0, f'{user}/Dropbox/Projects/toolbox/toolbox')
+# from general_utils import *
+# from socialspace import * 
+# from nlp import *
+from factor_analysis import FactorAnalysis
+
 
 #---------------------------------------------------------------------------------------------------------------------------------------------
-# my stuff:
+# data 
 #---------------------------------------------------------------------------------------------------------------------------------------------
 
 
 user = os.path.expanduser('~')
 if user == '/Users/matty_gee':
     base_dir = f'{user}/Desktop/projects/SNT-online_behavioral'
-fig_dir = '../figs'
-
-sys.path.insert(0, f'{user}/Dropbox/Projects/SNT_code/')
-sys.path.insert(0, f'{user}/Dropbox/Projects/toolbox/toolbox')
-from geometry import circular_hist, calculate_angle, circ_corrcc, circ_corrcl
-from general_utils import *
-from regression import run_ols
-from dim_reduction import FactorAnalysis
-from socialspace import * 
-from plotting import *
-from nlp import *
-from stats import calc_perm_pvalue
+fig_dir = './figs'
 
 # load data if exists
 def update_sample_dict(data):
@@ -68,7 +66,6 @@ def update_sample_dict(data):
             'Combined': {'data': data, 'color': 'black'}}
 
 try: 
-
     # clean up a bit
     data = pd.read_excel(glob.glob(f'{base_dir}/Data/All-data_summary_n*.xlsx')[0]) # new factors included
     data.drop_duplicates(subset=['sub_id'], keep='first', inplace=True)
@@ -89,7 +86,6 @@ try:
     sample_colors = [sample_dict[sample]['color'] for sample in sample_dict]
     for sample in sample_dict:
         print(f"{sample} n={len(sample_dict[sample]['data'])}")
-
 except Exception as e:
     print(f'Could not load data: {e}')
     
@@ -97,13 +93,12 @@ try:
     questionnaire_items = pd.read_excel(f'{base_dir}/questionnaire_items.xlsx')
     questionnaire_items = questionnaire_items.drop_duplicates('item')
     print('Questionnaire items loaded')
-except:
-    print('Could not load questionnaire items')
-
+except Exception as e:
+    print(f'Could not load questionnaire items: {e}')
 
 
 #---------------------------------------------------------------------------------------------------------------------------------------------
-# other details
+# columns, labels etc
 #---------------------------------------------------------------------------------------------------------------------------------------------
 
 # data = flip_power(data) # gotta come up with a better way to do this...
@@ -130,10 +125,9 @@ ques_labels = {
 }
 
 # which fa to test more
-fa = 'quartimax_thresh25'
-social_factor     = f'factor_social_{fa}'
-mood_factor       = f'factor_mood_{fa}'
-compulsive_factor = f'factor_compulsive_{fa}'
+social_factor     = 'factor_social_quartimax_thresh25'
+mood_factor       = 'factor_mood_quartimax_thresh25'
+compulsive_factor = 'factor_compulsive_quartimax_thresh25'
 factor_labels = [social_factor, mood_factor, compulsive_factor]
 factor_names  = ['Social Avoidance', 'Mood', 'Compulsion']
 factor_dict   = dict(zip(factor_labels, factor_names))
@@ -169,39 +163,23 @@ try:
 except:
     print('no data to get the relationhip columns from')
 
+
 #---------------------------------------------------------------------------------------------------------------------------------------------
+# task stuff
 #---------------------------------------------------------------------------------------------------------------------------------------------
 
 
-def isfinite(x):
-    mask = np.isfinite(x)
-    return x[mask], mask
-
-def load_behav(sub_id, neutrals=True):
-    behav_files = glob.glob(f'{base_dir}/Data/*/SNT/Behavior/*.xlsx')
-    try:
-        behav_fname = [f for f in behav_files if f'SNT_{sub_id}' in f][0]
-        df = pd.read_excel(behav_fname)
-    except:
-        print(f'No behavior file for {sub_id}')
-        return None
-    if not neutrals:
-        df = df[df['char_role_num'] != 6].reset_index(drop=True)
-    return df
-
-def reshape_dataframe(df, cols):
-    """
-    Takes a DataFrame and a list of lists of column names.
-    Returns a 3D array with shape (p, n, m), where p is the number of rows in the DataFrame,
-    n is the number of lists, and m is the length of each list.
-    """
-    if not all(isinstance(item, list) for item in cols):
-        raise ValueError("All items in cols must be lists.")
-    array_3d = []
-    for col_list in cols:
-        selected_cols = df[col_list]
-        array_3d.append(selected_cols.values)
-    return np.array(array_3d).transpose(1, 0, 2)
+task = pd.read_excel('snt_details.xlsx')
+task.sort_values(by='cogent_onset', inplace=True)
+decision_trials = task[task['trial_type'] == 'Decision']
+dtype_dict = {'decision_num': int,
+                'scene_num': int,
+                'char_role_num': int,
+                'char_decision_num': int,
+                'cogent_onset': float}
+decision_trials = decision_trials.astype(dtype_dict) # ensure correct dtypes
+decision_trials.reset_index(inplace=True, drop=True)
+character_roles  = ['first', 'second', 'assistant', 'powerful', 'boss', 'neutral'] # in order of role num in snt_details
 
 def get_coords(df, which='task', include_neutral=False):
 
@@ -233,8 +211,75 @@ def get_coords(df, which='task', include_neutral=False):
     elif which == 'relationship_ratings':
         return reshape_dataframe(df, [[f'{role}_likability_relationship', f'{role}_impact_relationship'] for role in relationship_cols])
 
+def load_behav(sub_id, neutrals=True):
+    behav_files = glob.glob(f'{base_dir}/Data/*/SNT/Behavior/*.xlsx')
+    try:
+        behav_fname = [f for f in behav_files if f'SNT_{sub_id}' in f][0]
+        df = pd.read_excel(behav_fname)
+    except:
+        print(f'No behavior file for {sub_id}')
+        return None
+    if not neutrals:
+        df = df[df['char_role_num'] != 6].reset_index(drop=True)
+    return df
+
+
+#---------------------------------------------------------------------------------------------------------------------------------------------
+#---------------------------------------------------------------------------------------------------------------------------------------------
+
+
+def isfinite(x):
+    mask = np.isfinite(x)
+    return x[mask], mask
+
+def reshape_dataframe(df, cols):
+    """
+    Takes a DataFrame and a list of lists of column names.
+    Returns a 3D array with shape (p, n, m), where p is the number of rows in the DataFrame,
+    n is the number of lists, and m is the length of each list.
+    """
+    if not all(isinstance(item, list) for item in cols):
+        raise ValueError("All items in cols must be lists.")
+    array_3d = []
+    for col_list in cols:
+        selected_cols = df[col_list]
+        array_3d.append(selected_cols.values)
+    return np.array(array_3d).transpose(1, 0, 2)
+
 def get_item(item):
     return questionnaire_items[questionnaire_items['item']==item]
+
+flatten_lists = lambda l: [item for sublist in l for item in sublist]
+
+def subset_df(df, ques_prefixes):
+    ques_dfs = [df.filter(regex=(f"{ques}_.*")) for ques in ques_prefixes]
+    ques_df = pd.concat(ques_dfs, axis=1)
+    ques_df = ques_df[[c for c in ques_df if ('_att' not in c) & ('score' not in c)]]
+    ques_df.insert(0, 'sub_id', df['sub_id'])
+    return ques_df
+
+def list_cols(substr):
+    # list columns that contain a substring
+    return list(data.filter(regex=substr).columns)
+
+def rescale(data, center=50):
+    """
+    Rescale data to be between [-1, +]
+    """
+    return (data - center) / center
+
+def get_cols(substr):
+    # use wildcards to find columns in a dataframe
+    return data.filter(regex=substr)
+ 
+def get_rdv(x, metric='euclidean'):
+    return symm_mat_to_ut_vec(pairwise_distances(x, metric=metric))
+
+def symm_mat_to_ut_vec(mat):
+    """ go from symmetrical matrix to vectorized/flattened upper triangle """
+    if isinstance(mat, pd.DataFrame):
+        mat = mat.values
+    return mat[np.triu_indices(len(mat), k=1)]
 
 
 #---------------------------------------------------------------------------------------------------------------------------------------------
@@ -356,17 +401,8 @@ tick_fontsize, label_fontsize, title_fontsize = 10, 13, 15
 legend_title_fontsize, legend_label_fontsize = 12, 10
 suptitle_fontsize = title_fontsize * 1.5
 ec, lw = 'black', 1
-bw = 0.15 # this is a proportion of the total??
+bw = 0.15 
 figsize, facet_figsize = (5, 5), (5, 7.5)
-# sns.set_context("paper", rc={"font.size":8, "axes.titlesize":title_fontsize, "axes.labelsize":label_fontsize}) 
-
-# plt.subplots_adjust(left=None, bottom=None, right=None, top=None, wspace=None, hspace=None)
-# left  = 0.125  # the left side of the subplots of the figure
-# right = 0.9    # the right side of the subplots of the figure
-# bottom = 0.1   # the bottom of the subplots of the figure
-# top = 0.9      # the top of the subplots of the figure
-# wspace = 0.2   # the amount of width reserved for blank space between subplots
-# hspace = 0.2   # the amount of height reserved for white space between subplots
 
 def plot_significance(ax, pvalue, sig_level=4, color=None, x=0.0, y=0.98, dx=0.015, fontsize=17):
     alphas = [0.05, 0.01, 0.005, 0.001, 0.0005, 0.0001, 0.00005, 0.00001]
@@ -383,126 +419,6 @@ def add_sig_stars(x, y, df, demo_controls, ax, color):
     for s, sig in enumerate(sigs):
         if ols_obj.pvalues[x] < sig:
             ax.text(0.225-x_change*s, 0.98, "*", color=color, fontsize=15, ha="left", va="top", transform=ax.transAxes)  
-
-def corr_mat_plot(df, size = 10):
-    '''Plot a graphical correlation matrix for a dataframe.
-
-    Input:
-        df: pandas DataFrame
-        size: vertical and horizontal size of the plot'''
-    
-    # Compute the correlation matrix for the received dataframe
-    corr_mat = df.corr()
-    
-    # Plot the correlation matrix
-    fig, ax = plt.subplots(figsize=(size, size))
-    ax.grid(False)
-    cax = ax.matshow(corr_mat, cmap='jet', vmin=-1, vmax=1)
-    plt.xticks(range(len(corr_mat.columns)), corr_mat.columns, rotation=90)
-    plt.yticks(range(len(corr_mat.columns)), corr_mat.columns)
-    
-    # Add the colorbar legend
-    cbar = fig.colorbar(cax, ticks = [-1, 0, 1], aspect = 40, shrink = .8)
-    
-    return corr_mat
-
-def filter_sig_correlations(corr_mat, p_mat, thresh=0.00001):
-    '''
-    '''
-    # output the relationships with significant pvalues from a correlation matrix
-
-    # turn matrices in flattened upper tri 
-    pval_ut = symm_mat_to_ut_vec(p_mat.values)
-    corr_ut = symm_mat_to_ut_vec(corr_mat.values)
-
-    # annoying way to get the upper tri comparisons
-    ut_indices = np.triu_indices_from(corr_mat,1)
-    ut_indices = np.array(ut_indices).reshape(2,len(ut_indices[0])).T
-    corr_names = np.array([[corr_mat.index[i], corr_mat.columns[j]] for i, j in ut_indices])
-
-    # only print out the significant relationship
-    p_mask = symm_mat_to_ut_vec((p_mat < thresh).values)
-
-    filtered_corrs = [('corr('+c[0]+','+c[1]+')', 'r='+str(np.round(r,4)), 'p='+str(np.round(p,5))) 
-                         for c, r, p 
-                         in zip(corr_names[p_mask], corr_ut[p_mask], pval_ut[p_mask])]
-    return filtered_corrs
-
-def calc_asymmetrical_corr_mat(x_df, y_df):
-    """
-        Computes the asymmetrical correlation matrix between two sets of variables.
-
-        Parameters:
-        x_df (pd.DataFrame): DataFrame with variables on the x-axis. Shape (num_subs x num_variables).
-        y_df (pd.DataFrame): DataFrame with variables on the y-axis. Shape (num_subs x num_variables).
-
-        Returns:
-        tuple: Two DataFrames containing the correlation coefficients and p-values.
-
-        Note:
-        Any angular data should be in degrees and have 'angles' in the column name.
-        For egocentric angles, consider using cos(angles_rads) and then compute correlation.
-    """
-
-    # Assertions to ensure input dataframes are as expected
-    assert isinstance(x_df, pd.DataFrame), "x_df must be a pandas DataFrame."
-    assert isinstance(y_df, pd.DataFrame), "y_df must be a pandas DataFrame."
-
-    y_names, x_names = y_df.columns, x_df.columns
-    coef_mat = np.zeros((len(y_names), len(x_names)))
-    pval_mat = np.zeros((len(y_names), len(x_names)))
-
-    # Compute correlation matrix
-    for y, y_name in enumerate(y_names):
-        for x, x_name in enumerate(x_names):
-            finite_mask = np.isfinite(x_df[x_name]) & np.isfinite(y_df[y_name]) # Filter out non-finite values
-
-            # Determine the type of correlation to use based on column names
-            if 'angles' not in x_name and 'angles' not in y_name:
-                coef, pval = scipy.stats.pearsonr(x_df[x_name][finite_mask], y_df[y_name][finite_mask])
-            elif 'angles' in x_name and 'angles' not in y_name:
-                coef, pval = circ_corrcl(x_df[x_name][finite_mask], y_df[y_name][finite_mask])
-            elif 'angles' not in x_name and 'angles' in y_name:
-                coef, pval = circ_corrcl(y_df[y_name][finite_mask], x_df[x_name][finite_mask])
-            else: # Both columns have 'angles'
-                coef, pval = circ_corrcc(y_df[y_name][finite_mask], x_df[x_name][finite_mask])
-
-            coef_mat[y, x], pval_mat[y, x] = coef, pval
-
-    # Convert matrices to DataFrames for easier handling
-    coef_df = pd.DataFrame(coef_mat, index=y_names, columns=x_names).astype(float)
-    pval_df = pd.DataFrame(pval_mat, index=y_names, columns=x_names).astype(float)
-    return coef_df, pval_df
-
-def plot_asymmetrical_corrmat(coef_df, pval_df=None, alpha=.05):
-    '''
-    '''
-    # if 
-    x_names  = coef_df.columns
-    y_names  = coef_df.index
-    coef_mat = coef_df.values
-
-    fig, ax = plt.subplots(figsize=(10,10))
-    if pval_df is not None: # masked correlation plot
-        pval_mat = pval_df.values
-        masked_corrs = coef_mat * ((pval_mat < alpha) * 1)
-        im = ax.imshow(masked_corrs, cmap="RdBu", vmax=1, vmin=-1)
-        ax.set_title(f'Correlations (p<{alpha} fpr)', fontsize=title_fontsize)
-        for i in np.arange(len(y_names)):
-            for j in np.arange(len(x_names)):
-                if pval_mat[i,j] < alpha:
-                    ax.text(j, i, np.round(pval_mat[i,j], 2),
-                            ha="center", va="center", color="black", fontsize=5)
-    else:
-        im = ax.imshow(coef_mat, cmap="RdBu", vmax=1, vmin=-1)
-
-    ax.set_yticks(np.arange(len(y_names)))
-    ax.set_yticklabels(y_names, fontsize=tick_fontsize)
-    ax.set_xticks(np.arange(len(x_names)))
-    ax.set_xticklabels(x_names, fontsize=tick_fontsize, rotation=90)    
-    plt.show()
-    
-    return fig
 
 def plot_space_density(x, y, figsize=(5,5), ax=None, regression=False):
     
@@ -588,7 +504,6 @@ def plot_ols_models_metrics(results_df, metric='train_BIC', colors=None):
     plt.legend([],[], frameon=False)
     plt.show()
 
-# newer
 def create_subplots(grid_size, irregular_axes=None, figsize=(10,10), annotate=False):
     fig = plt.figure(figsize=figsize)
 
@@ -619,31 +534,9 @@ def create_subplots(grid_size, irregular_axes=None, figsize=(10,10), annotate=Fa
 
 
 #---------------------------------------------------------------------------------------------------------------------------------------------
-# generic helpers
-#---------------------------------------------------------------------------------------------------------------------------------------------
-
-
-flatten_lists = lambda l: [item for sublist in l for item in sublist]
-
-def subset_df(df, ques_prefixes):
-    ques_dfs = [df.filter(regex=(f"{ques}_.*")) for ques in ques_prefixes]
-    ques_df = pd.concat(ques_dfs, axis=1)
-    ques_df = ques_df[[c for c in ques_df if ('_att' not in c) & ('score' not in c)]]
-    ques_df.insert(0, 'sub_id', df['sub_id'])
-    return ques_df
-
-def list_cols(substr):
-    # list columns that contain a substring
-    return list(data.filter(regex=substr).columns)
-
-
-
-#---------------------------------------------------------------------------------------------------------------------------------------------
 # EFA
 #---------------------------------------------------------------------------------------------------------------------------------------------
 
-
-from collections import Counter
 
 def name_factors(loadings, items, n_items=40):
 
@@ -699,8 +592,6 @@ def run_fa(ques_df, corrmat, n_comps, rotation):
 #---------------------------------------------------------------------------------------------------------------------------------------------
 #---------------------------------------------------------------------------------------------------------------------------------------------
 
-
-import shapely
 
 def get_quadrant(x, y, origin=(0, 0)):
     """
@@ -806,23 +697,208 @@ def calc_area(xy):
     except:
         return np.nan
 
-def rescale(data, center=50):
-    """
-    Rescale data to be between [-1, +]
-    """
-    return (data - center) / center
-
-def get_cols(substr):
-    # use wildcards to find columns in a dataframe
-    return data.filter(regex=substr)
- 
-def get_rdv(x, metric='euclidean'):
-    return symm_mat_to_ut_vec(pairwise_distances(x, metric=metric))
 
 
 #---------------------------------------------------------------------------------------------------------------------------------------------
 #---------------------------------------------------------------------------------------------------------------------------------------------
 
+def calc_perm_pvalue(stat, perm_stats, alternative='two-sided'):
+    '''
+    Calculate p-value of test statistic compared to permutation generated distribution.
+    Finds percentage of permutation distribution that is at least as extreme as the test statistic
+
+    Arguments
+    ---------
+    stat : float
+        Test statistic
+    perm_stats : array of floats
+        Permutation generated (null) statistics
+    alternative : str (optional)
+
+    Returns
+    -------
+    float 
+        p-value
+
+    [By Matthew Schafer, github: @matty-gee; 2020ish]
+    '''
+
+    n = len(perm_stats)
+    p_greater = (np.sum(perm_stats >= stat) + 1) / (n + 1) # add one for a continuity correction
+    p_less    = (np.sum(perm_stats <= stat) + 1) / (n + 1)
+
+    if alternative == 'two-sided':   
+        # accounts for scenario where the observed statistic is exactly at the median of the permutation distribution
+        return 2 * min(p_greater, p_less) if p_greater + p_less > 1 else 2 * max(p_greater, p_less) 
+    elif alternative == 'greater':  
+        return p_greater
+    elif alternative == 'less':     
+        return p_less
+    
+def plot_barplot(x, y, ax=None, color=None, pal=None, **kwargs):
+    if ax is None: ax = plt.gca()
+    sns.barplot(x=x, y=y, color=color, palette=pal, 
+                edgecolor='black', 
+                ax=ax, **kwargs)
+    ax.tick_params(axis='x', labelsize=tick_fontsize)
+    ax.tick_params(axis='y', labelsize=tick_fontsize)
+    return ax
+
+def run_ols(X, y=None, covariates=None, data=None,
+            loglik_ratio=False, 
+            popmean=0, 
+            verbose=False):
+    '''
+        Run ordinary least squares regression or 1-sample t-test
+        Wrapper for statsmodels OLS
+        Cleans up strings to be compatible with patsy & statsmodel formulas
+
+        Inputs:
+            X: Dataframe, series, list strings, string, or array
+            y (optional): Dataframe, series, list strings, string, or array
+            data (optional): Dataframe, for use if X & y are strings
+            covariates (optional): list of strings, for use if X & y are strings
+
+            popmean (optional): float or int, for use if t-test
+
+            plot (optional): bool, plot the predicted vs observed values
+        
+        Outputs:
+            out_df: Dataframe, summary of regression results
+            ols_obj: statsmodels OLS object
+    '''
+
+    # helpers
+    def clean_string(string):
+        if '.' in string:
+            string = string.replace('.', '_')
+        return string
+
+    def make_dataframe(a):
+        if isinstance(a, pd.DataFrame): 
+            return a.reset_index(drop=True)
+        if isinstance(a, pd.Series): 
+            return a.to_frame().reset_index(drop=True)
+        else:
+            if isinstance(a, list): a = np.array(a)
+            if a.ndim == 1: a = a[:, np.newaxis]
+            return pd.DataFrame(a)
+
+    def nanzscore(arr):
+        arr_z = np.array([np.nan] * len(arr)) # create an array of nans the same size as arr
+        arr_z[np.isfinite(arr)] = scipy.stats.zscore(arr[np.isfinite(arr)]) # calculate the zscore of the masked array
+        return arr_z
+
+    # handle strings
+    if isinstance(X, str) or (isinstance(X, list) and isinstance(X[0], str)):
+
+        # is it a formula?
+        if '~' in X:
+           
+            df = data.copy()
+            y, X = patsy.dmatrices(X, df, return_type="dataframe")
+
+        # if not, construct the formula
+        else:
+
+            if (isinstance(X, str)): X = [X]
+            cols = list(np.unique(flatten_lists([x.split('*') if '*' in x else [x] for x in X] + [[y]])))
+            if covariates is not None: 
+                if (isinstance(covariates, str)): covariates = [covariates]
+                cols.extend(covariates)
+            df = data[cols].copy() # restrict to the columns provided (exclude interaction labels)
+
+            # remove '.' & rename columns
+            X_labels = X.copy()
+            if any(['.' in col for col in df.columns]):
+                for i, x_label_ in enumerate(X):
+                    X_labels[i] = clean_string(x_label_)
+                    df.rename(columns={x_label_:X_labels[i]}, inplace=True)
+                df.rename(columns={y:clean_string(y)}, inplace=True)
+
+            # create dataframes from patsy formula
+            X_labels = X_labels + covariates if covariates is not None else X_labels
+            y, X = patsy.dmatrices(f'{clean_string(y)} ~ ' + ' + '.join(X_labels), df, return_type="dataframe")
+
+    # handle series, dataframes, arrays or lists
+    else: 
+
+        # build the regression from arrays
+        if y is not None: 
+            y = make_dataframe(y)
+            if isinstance(y.columns[0], int): y.columns = ['y']
+            X = make_dataframe(X)
+            if all([isinstance(c, int) for c in X.columns]): X.columns = [f'x{i+1}' for i in range(X.shape[1])]
+            X = sm.add_constant(X)
+            X.rename(columns={'const':'Intercept'}, inplace=True)
+
+        # if y is None, then its a 1-sample t-test: X ~ intercept
+        else:
+            y = make_dataframe(X)
+            xcol = y.columns[0] if not isinstance(y.columns[0], int) else 'x1'
+            X = pd.DataFrame(np.ones(len(X)), columns=[xcol])
+            y.rename(columns={y.columns[0]:f' against {popmean}'}, inplace=True) # rename so easier to interpret in output
+            y = y - popmean
+
+    # z-score continuous variables (ols only)
+    y[y.columns[0]] = nanzscore(y[y.columns[0]])
+    if verbose: print(f'Z-scored y: {y.columns[0]}')
+    for col in X.columns:
+        if (X.dtypes[col] in ['float64', 'int64']) & (col not in ['Intercept', 'const']) & (X[col].nunique() > 2):
+            X[col] = nanzscore(X[col])
+            if verbose: print(f'Z-scored x: {col}')
+        
+    # run the regression 
+    try: 
+        ols    = sm.OLS(y, X, missing='drop').fit()
+        out_df = pd.DataFrame(ols.summary2().tables[1])
+
+        if loglik_ratio:
+            ll_0 = sm.OLS(y, sm.add_constant(np.ones(len(y))), missing='drop').fit() # null model (intercept-only)
+            ll_r, ll_r_p = ols.compare_lr_test(ll_0)[:2] # compare against null
+    
+    except Exception as e:
+        print(f'Error: {e}')
+        return X, y
+
+    # clean up the output
+    out_df.columns = ['beta', 'se', 't', 'p', '95%_lb', '95%_ub']
+    out_df.reset_index(inplace=True)
+    out_df.rename(columns={'index': 'x'}, inplace=True)
+    out_df['X'] = (' + ').join(X.columns.tolist())
+    out_df['y'] = y.columns[0]
+    out_df['dof'] = ols.df_resid
+    # out_df['z'] = scipy.stats.norm.ppf(1 - out_df['p'] / 2) # z-score for 2-tailed test
+
+    if loglik_ratio: 
+        out_df['ll'] = ols.llf
+        out_df['llr'] = ll_r
+        out_df['llr_p'] = ll_r_p
+    out_df['adj_rsq'] = np.round(ols.rsquared_adj, 3)
+    out_df['bic'] = np.round(ols.bic, 2)
+    out_df['aic'] = np.round(ols.aic, 2)
+    out_df['p_right'] = [p/2 if b > 0 else 1-p/2 for b, p in zip(out_df['beta'].values, out_df['p'].values)]
+    out_df['p_left']  = [p/2 if b < 0 else 1-p/2 for b, p in zip(out_df['beta'].values, out_df['p'].values)]
+
+    if loglik_ratio:
+        out_df = out_df[['X', 'y', 'x', 'dof', 'll', 'llr', 'llr_p', 'adj_rsq', 'bic', 'aic', 'beta', 'se', 
+                         '95%_lb', '95%_ub', 't', 'p', 'p_left', 'p_right']]
+    else:
+        out_df = out_df[['X', 'y', 'x', 'dof', 'adj_rsq', 'bic', 'aic', 'beta', 'se', 
+                         '95%_lb', '95%_ub', 't', 'p', 'p_left', 'p_right']]
+    if 'against' in y.columns[0]: out_df['X'] = 't-test'
+
+    return out_df, ols
+
+def save_figure(fig, fname, formats=None):
+    if isinstance(formats, str): 
+        formats = [formats]
+    elif formats is None: formats = ['png']
+    formats = [format[1:] if format.startswith('.') else format for format in formats]
+    if fname.endswith('.png') or fname.endswith('.jpg') or fname.endswith('.svg'):
+        fname = fname[:-4]
+    for format in formats:
+        fig.savefig(f'{fname}.{format}',format=format, bbox_inches='tight', dpi=1200)
 
 def parametric_ci(coeffs, conf=99):
     '''

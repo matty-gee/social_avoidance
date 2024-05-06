@@ -1,14 +1,9 @@
 import sys, os, glob, random, warnings, itertools
-warnings.filterwarnings("ignore") 
-
 from six.moves import cPickle as pickle
 import patsy
-
 import numpy as np
 from numpy.linalg import norm
 import pandas as pd
-pd.set_option('display.precision', 4)
-
 import sklearn
 from sklearn.metrics import r2_score
 from sklearn.preprocessing import MinMaxScaler
@@ -19,33 +14,26 @@ from sklearn.cross_decomposition import CCA, PLSRegression, PLSCanonical
 from sklearn.metrics import pairwise_distances, mean_squared_error, mean_absolute_error, r2_score
 from sklearn.model_selection import KFold, cross_val_predict, train_test_split, StratifiedShuffleSplit, StratifiedKFold
 from sklearn.pipeline import make_pipeline
-
 import scipy
 from scipy.stats import (
     ttest_1samp, kendalltau, chi2_contingency,
     wilcoxon, pearsonr, spearmanr, gaussian_kde, zscore
 )
 from scipy.spatial import distance
-
 import statsmodels.api as sm
 from statsmodels.multivariate.cancorr import CanCorr
 from statsmodels.regression import linear_model
-
 from matplotlib.gridspec import GridSpec
 import matplotlib.pyplot as plt
 import matplotlib.patches as mpatches
 from matplotlib.patches import Patch
 import seaborn as sns
 import plotly.express as px
-
 import shapely
 from collections import Counter
 
-
-# sys.path.insert(0, f'{user}/Dropbox/Projects/toolbox/toolbox')
-# from general_utils import *
-# from socialspace import * 
-# from nlp import *
+warnings.filterwarnings("ignore") 
+pd.set_option('display.precision', 4)
 from factor_analysis import FactorAnalysis
 
 
@@ -102,7 +90,6 @@ except Exception as e:
 #---------------------------------------------------------------------------------------------------------------------------------------------
 
 # data = flip_power(data) # gotta come up with a better way to do this...
-    
 demo_controls  = ['demo_age', 'demo_gender_1W', 'demo_race_white', 'iq_score', 'disorder'] #  'after_vaccine_fda'
 all_controls = demo_controls + other_controls + ['memory_mean']
 sample_colors = ['darkorchid', 'royalblue']

@@ -292,6 +292,16 @@ def flip_power(data):
     return data_
 
 # plotting ols
+def plot_regplot(x, y, ax=None, color=None, **kwargs):
+    if ax is None: ax = plt.gca()
+    if color is None: color = 'grey'
+    sns.regplot(x=x, y=y, color=color, 
+                scatter_kws={'s': 75, 'edgecolor': ec, 'linewidth': lw, 'alpha': .75}, 
+                ax=ax, **kwargs)
+    ax.tick_params(axis='x', labelsize=tick_fontsize)
+    ax.tick_params(axis='y', labelsize=tick_fontsize)
+    return ax
+
 def plot_regplot_replication(xvars, yvars, 
                              size=4, 
                              p_tail='p', ps=None, p_plot='right'):
@@ -588,6 +598,7 @@ def run_fa(ques_df, corrmat, n_comps, rotation):
     
     return efa, factor_labels, factor_summary
 
+
 #---------------------------------------------------------------------------------------------------------------------------------------------
 #---------------------------------------------------------------------------------------------------------------------------------------------
 
@@ -695,7 +706,6 @@ def calc_area(xy):
         # return scipy.spatial.ConvexHull(xy[~np.isnan(xy)].reshape(-1, 2)).volume
     except:
         return np.nan
-
 
 
 #---------------------------------------------------------------------------------------------------------------------------------------------

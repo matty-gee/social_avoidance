@@ -215,6 +215,16 @@ def load_behav(sub_id, neutrals=True):
 #---------------------------------------------------------------------------------------------------------------------------------------------
 
 
+def pickle_file(file_, filename_, protocol=4):
+    with open(filename_, 'wb') as f:
+        pickle.dump(file_, f, protocol=protocol)
+    f.close()
+
+def load_pickle(filename_):
+    with open(filename_, 'rb') as f:
+        ret_file = pickle.load(f)
+    return ret_file
+
 def isfinite(x):
     mask = np.isfinite(x)
     return x[mask], mask
@@ -525,11 +535,13 @@ def create_subplots(grid_size, irregular_axes=None, figsize=(10,10), annotate=Fa
 #---------------------------------------------------------------------------------------------------------------------------------------------
 
 
-def name_factors(loadings, items, n_items=40):
+def name_factors(loadings, items, n_items=20):
 
     ques      = np.unique([ii.split('_')[0] for ii in items])
     loadings  = pd.DataFrame(loadings, index=items)
-    factor_qs = {'mood':['sds', 'aes'], 'compulsive':['oci', 'zbpd'], 'social':['lsas', 'apdis', 'bapq']}
+    factor_qs = {'mood':['sds', 'aes'], 
+                 'compulsive':['oci', 'zbpd'], 
+                 'social':['lsas', 'apdis', 'bapq']}
 
     loadings   = pd.DataFrame(loadings, index=items)
     summary_df = pd.DataFrame(columns=['factor_num', 'factor_label'] + 
@@ -537,9 +549,10 @@ def name_factors(loadings, items, n_items=40):
                                        [f'item_{i+1}' for i in range(len(items))])
     for i in range(3):
 
+        # get the top items for this factor
         top_items = loadings.iloc[:,i].sort_values(ascending=False)
 
-        # which questions load most on this factor
+        # which questions load most on this factor?
         most_common = Counter([ii.split('_')[0] for ii in top_items[:n_items].index]).most_common(10)
         most_common = [c[0] for c in most_common]
         
@@ -570,11 +583,10 @@ def run_fa(ques_df, corrmat, n_comps, rotation):
     assert efa.X.shape[0] == ques_df.shape[0], 'reduced X matrix has wrong number of rows'
 
     # assign factor names
-    factor_summary = name_factors(efa.loadings, efa.features)
+    factor_summary = name_factors(efa.loadings, efa.features, 20)
     factor_labels = [f'factor_{l}_{rotation}' for l in factor_summary['factor_label'].values]
     
     return efa, factor_labels, factor_summary
-
 
 #---------------------------------------------------------------------------------------------------------------------------------------------
 #---------------------------------------------------------------------------------------------------------------------------------------------
